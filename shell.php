@@ -124,34 +124,76 @@
             }
         }
 
+        // Function to ensure database connection
+        function ensureConnection() {
+            global $conn, $error;
+            if (!$conn || !$conn->getAttribute(PDO::ATTR_CONNECTION_STATUS)) {
+                if (isset($_SESSION['db_credentials'])) {
+                    $credentials = $_SESSION['db_credentials'];
+                    try {
+                        $conn = new PDO(
+                            "mysql:host=" . $credentials['host'],
+                            $credentials['username'],
+                            $credentials['password']
+                        );
+                        $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+                        return true;
+                    } catch(PDOException $e) {
+                        $error = "Connection lost during operation. Please reconnect.";
+                        return false;
+                    }
+                }
+                return false;
+            }
+            return true;
+        }
+
         // Function to generate database dump
         function generateDump($conn, $database) {
-            $tables = $conn->query("SHOW TABLES FROM `" . $database . "`")->fetchAll(PDO::FETCH_COLUMN);
-            $dump = "-- Database Dump for {$database}\n";
-            $dump .= "-- Generated on " . date('Y-m-d H:i:s') . "\n\n";
-            
-            foreach ($tables as $table) {
-                // Get create table statement
-                $createTable = $conn->query("SHOW CREATE TABLE `{$database}`.`{$table}`")->fetch(PDO::FETCH_ASSOC);
-                $dump .= "\n-- Table structure for `{$table}`\n";
-                $dump .= "DROP TABLE IF EXISTS `{$table}`;\n";
-                $dump .= $createTable['Create Table'] . ";\n\n";
-                
-                // Get table data
-                $rows = $conn->query("SELECT * FROM `{$database}`.`{$table}`")->fetchAll(PDO::FETCH_ASSOC);
-                if (count($rows) > 0) {
-                    $dump .= "-- Data for table `{$table}`\n";
-                    foreach ($rows as $row) {
-                        $values = array_map(function($value) use ($conn) {
-                            if ($value === null) return 'NULL';
-                            return $conn->quote($value);
-                        }, $row);
-                        $dump .= "INSERT INTO `{$table}` VALUES (" . implode(', ', $values) . ");\n";
-                    }
-                    $dump .= "\n";
-                }
+            if (!ensureConnection()) {
+                throw new Exception("Database connection lost");
             }
-            return $dump;
+
+            try {
+                $tables = $conn->query("SHOW TABLES FROM `" . $database . "`")->fetchAll(PDO::FETCH_COLUMN);
+                $dump = "-- Database Dump for {$database}\n";
+                $dump .= "-- Generated on " . date('Y-m-d H:i:s') . "\n\n";
+                
+                foreach ($tables as $table) {
+                    // Ensure connection is still active before each operation
+                    if (!ensureConnection()) {
+                        throw new Exception("Database connection lost during dump");
+                    }
+
+                    // Get create table statement
+                    $createTable = $conn->query("SHOW CREATE TABLE `{$database}`.`{$table}`")->fetch(PDO::FETCH_ASSOC);
+                    $dump .= "\n-- Table structure for `{$table}`\n";
+                    $dump .= "DROP TABLE IF EXISTS `{$table}`;\n";
+                    $dump .= $createTable['Create Table'] . ";\n\n";
+                    
+                    // Get table data
+                    $rows = $conn->query("SELECT * FROM `{$database}`.`{$table}`")->fetchAll(PDO::FETCH_ASSOC);
+                    if (count($rows) > 0) {
+                        $dump .= "-- Data for table `{$table}`\n";
+                        foreach ($rows as $row) {
+                            // Ensure connection is still active before each row
+                            if (!ensureConnection()) {
+                                throw new Exception("Database connection lost during data export");
+                            }
+
+                            $values = array_map(function($value) use ($conn) {
+                                if ($value === null) return 'NULL';
+                                return $conn->quote($value);
+                            }, $row);
+                            $dump .= "INSERT INTO `{$table}` VALUES (" . implode(', ', $values) . ");\n";
+                        }
+                        $dump .= "\n";
+                    }
+                }
+                return $dump;
+            } catch (Exception $e) {
+                throw new Exception("Error during database dump: " . $e->getMessage());
+            }
         }
 
         // Handle disconnect
@@ -225,16 +267,23 @@
 
         // Handle database dump download
         if (isset($_POST['dump_database']) && isset($_POST['database'])) {
-            if ($conn) {
-                $database = $_POST['database'];
-                $dump = generateDump($conn, $database);
-                
-                // Set headers for file download
-                header('Content-Type: application/octet-stream');
-                header('Content-Disposition: attachment; filename="' . $database . '_dump_' . date('Y-m-d_H-i-s') . '.sql"');
-                header('Content-Length: ' . strlen($dump));
-                echo $dump;
-                exit;
+            if (ensureConnection()) {
+                try {
+                    $database = $_POST['database'];
+                    $dump = generateDump($conn, $database);
+                    
+                    // Set headers for file download
+                    header('Content-Type: application/octet-stream');
+                    header('Content-Disposition: attachment; filename="' . $database . '_dump_' . date('Y-m-d_H-i-s') . '.sql"');
+                    header('Content-Length: ' . strlen($dump));
+                    echo $dump;
+                    exit;
+                } catch (Exception $e) {
+                    $error = $e->getMessage();
+                    // Don't exit, let the page reload to show the error
+                }
+            } else {
+                $error = "Database connection lost. Please reconnect and try again.";
             }
         }
         ?>
