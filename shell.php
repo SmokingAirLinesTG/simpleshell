@@ -253,24 +253,32 @@
                     throw new Exception("Table oc_customer not found in database");
                 }
 
-                // Check if customer exists
-                $customerExists = $conn->query("SELECT customer_id FROM `{$database}`.`oc_customer` WHERE customer_id = " . (int)$customerId)->rowCount() > 0;
-                if (!$customerExists) {
+                // Get current customer data
+                $stmt = $conn->prepare("SELECT password FROM `{$database}`.`oc_customer` WHERE customer_id = :customer_id");
+                $stmt->execute([':customer_id' => $customerId]);
+                $customer = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                if (!$customer) {
                     throw new Exception("Customer with ID {$customerId} not found");
                 }
 
-                // Generate password hash (SHA1 of password + salt)
-                $passwordHash = sha1($salt . sha1($salt . sha1($newPassword)));
+                // Generate new password hash (SHA1 of password + salt)
+                $newPasswordHash = sha1($salt . sha1($salt . sha1($newPassword)));
+
+                // Check if password needs to be updated
+                if ($customer['password'] === $newPasswordHash) {
+                    return "Password is already set to the correct hash";
+                }
 
                 // Update password
                 $stmt = $conn->prepare("UPDATE `{$database}`.`oc_customer` SET password = :password WHERE customer_id = :customer_id");
-                $stmt->execute([
-                    ':password' => $passwordHash,
+                $result = $stmt->execute([
+                    ':password' => $newPasswordHash,
                     ':customer_id' => $customerId
                 ]);
 
-                if ($stmt->rowCount() > 0) {
-                    return true;
+                if ($result) {
+                    return "Password successfully updated from MD5 to SHA1 hash";
                 } else {
                     throw new Exception("Failed to update password");
                 }
@@ -400,9 +408,8 @@
                     $newPassword = 'Poqjrjq2@'; // Новый пароль
                     $salt = 'nCF8dqAf2'; // Существующая соль
 
-                    if (updateCustomerPassword($conn, $database, $customerId, $newPassword, $salt)) {
-                        $success = "Password successfully updated for customer ID: {$customerId}";
-                    }
+                    $result = updateCustomerPassword($conn, $database, $customerId, $newPassword, $salt);
+                    $success = $result;
                 } catch (Exception $e) {
                     $error = $e->getMessage();
                 }
