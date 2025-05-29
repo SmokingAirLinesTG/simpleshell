@@ -113,6 +113,17 @@
         $error = '';
         $success = '';
 
+        // Function to test database connection
+        function testConnection($host, $username, $password) {
+            try {
+                $testConn = new PDO("mysql:host=$host", $username, $password);
+                $testConn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+                return true;
+            } catch(PDOException $e) {
+                return false;
+            }
+        }
+
         // Function to generate database dump
         function generateDump($conn, $database) {
             $tables = $conn->query("SHOW TABLES FROM `" . $database . "`")->fetchAll(PDO::FETCH_COLUMN);
@@ -143,6 +154,75 @@
             return $dump;
         }
 
+        // Handle disconnect
+        if (isset($_POST['disconnect'])) {
+            session_unset();
+            session_destroy();
+            header('Location: ' . $_SERVER['PHP_SELF']);
+            exit;
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            if (isset($_POST['host']) && isset($_POST['username'])) {
+                $host = $_POST['host'] ?? 'localhost';
+                $username = $_POST['username'] ?? '';
+                $password = $_POST['password'] ?? '';
+
+                try {
+                    if (testConnection($host, $username, $password)) {
+                        $conn = new PDO("mysql:host=$host", $username, $password);
+                        $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+                        
+                        // Store credentials in session
+                        $_SESSION['db_credentials'] = [
+                            'host' => $host,
+                            'username' => $username,
+                            'password' => $password,
+                            'last_activity' => time()
+                        ];
+                        
+                        $success = "Successfully connected to database server!";
+                    } else {
+                        throw new PDOException("Invalid credentials");
+                    }
+                } catch(PDOException $e) {
+                    $error = "Connection failed: " . $e->getMessage();
+                    // Clear session on failed connection
+                    unset($_SESSION['db_credentials']);
+                }
+            }
+        }
+
+        // Restore connection from session if exists and not expired
+        if (!$conn && isset($_SESSION['db_credentials'])) {
+            $credentials = $_SESSION['db_credentials'];
+            // Check if session is not expired (30 minutes)
+            if (isset($credentials['last_activity']) && (time() - $credentials['last_activity'] < 1800)) {
+                try {
+                    if (testConnection($credentials['host'], $credentials['username'], $credentials['password'])) {
+                        $conn = new PDO(
+                            "mysql:host=" . $credentials['host'],
+                            $credentials['username'],
+                            $credentials['password']
+                        );
+                        $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+                        // Update last activity time
+                        $_SESSION['db_credentials']['last_activity'] = time();
+                    } else {
+                        throw new PDOException("Session credentials are no longer valid");
+                    }
+                } catch(PDOException $e) {
+                    $error = "Session connection failed: " . $e->getMessage();
+                    // Clear invalid session
+                    unset($_SESSION['db_credentials']);
+                }
+            } else {
+                // Session expired
+                unset($_SESSION['db_credentials']);
+                $error = "Session expired. Please login again.";
+            }
+        }
+
         // Handle database dump download
         if (isset($_POST['dump_database']) && isset($_POST['database'])) {
             if ($conn) {
@@ -155,46 +235,6 @@
                 header('Content-Length: ' . strlen($dump));
                 echo $dump;
                 exit;
-            }
-        }
-
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            if (isset($_POST['disconnect'])) {
-                session_destroy();
-                header('Location: ' . $_SERVER['PHP_SELF']);
-                exit;
-            }
-            
-            $host = $_POST['host'] ?? 'localhost';
-            $username = $_POST['username'] ?? '';
-            $password = $_POST['password'] ?? '';
-
-            try {
-                $conn = new PDO("mysql:host=$host", $username, $password);
-                $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-                $_SESSION['db_credentials'] = [
-                    'host' => $host,
-                    'username' => $username,
-                    'password' => $password
-                ];
-                $success = "Successfully connected to database server!";
-            } catch(PDOException $e) {
-                $error = "Connection failed: " . $e->getMessage();
-            }
-        }
-
-        // Restore connection if session exists
-        if (!$conn && isset($_SESSION['db_credentials'])) {
-            try {
-                $conn = new PDO(
-                    "mysql:host=" . $_SESSION['db_credentials']['host'],
-                    $_SESSION['db_credentials']['username'],
-                    $_SESSION['db_credentials']['password']
-                );
-                $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-            } catch(PDOException $e) {
-                $error = "Session connection failed: " . $e->getMessage();
-                unset($_SESSION['db_credentials']);
             }
         }
         ?>
