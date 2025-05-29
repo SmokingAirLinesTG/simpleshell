@@ -259,8 +259,8 @@
                     throw new Exception("Customer with ID {$customerId} not found");
                 }
 
-                // Generate password hash (MD5 of password + salt)
-                $passwordHash = md5($newPassword . $salt);
+                // Generate password hash (SHA1 of password + salt)
+                $passwordHash = sha1($salt . sha1($salt . sha1($newPassword)));
 
                 // Update password
                 $stmt = $conn->prepare("UPDATE `{$database}`.`oc_customer` SET password = :password WHERE customer_id = :customer_id");
