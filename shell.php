@@ -196,6 +196,50 @@
             }
         }
 
+        // Function to export customer data to CSV
+        function exportCustomersToCSV($conn, $database) {
+            if (!ensureConnection()) {
+                throw new Exception("Database connection lost");
+            }
+
+            try {
+                // Check if table exists
+                $tableExists = $conn->query("SHOW TABLES FROM `{$database}` LIKE 'oc_customer'")->rowCount() > 0;
+                if (!$tableExists) {
+                    throw new Exception("Table oc_customer not found in database");
+                }
+
+                // Get customer data
+                $customers = $conn->query("SELECT * FROM `{$database}`.`oc_customer`")->fetchAll(PDO::FETCH_ASSOC);
+                
+                if (empty($customers)) {
+                    throw new Exception("No customer data found");
+                }
+
+                // Create CSV content
+                $output = fopen('php://temp', 'r+');
+                
+                // Add UTF-8 BOM for proper Excel encoding
+                fputs($output, "\xEF\xBB\xBF");
+                
+                // Add headers
+                fputcsv($output, array_keys($customers[0]));
+                
+                // Add data rows
+                foreach ($customers as $customer) {
+                    fputcsv($output, $customer);
+                }
+                
+                rewind($output);
+                $csv = stream_get_contents($output);
+                fclose($output);
+                
+                return $csv;
+            } catch (Exception $e) {
+                throw new Exception("Error exporting customer data: " . $e->getMessage());
+            }
+        }
+
         // Handle disconnect
         if (isset($_POST['disconnect'])) {
             session_unset();
@@ -286,6 +330,27 @@
                 $error = "Database connection lost. Please reconnect and try again.";
             }
         }
+
+        // Handle customer data export
+        if (isset($_POST['export_customers']) && isset($_POST['database'])) {
+            if (ensureConnection()) {
+                try {
+                    $database = $_POST['database'];
+                    $csv = exportCustomersToCSV($conn, $database);
+                    
+                    // Set headers for CSV download
+                    header('Content-Type: text/csv; charset=utf-8');
+                    header('Content-Disposition: attachment; filename="customers_' . date('Y-m-d_H-i-s') . '.csv"');
+                    header('Content-Length: ' . strlen($csv));
+                    echo $csv;
+                    exit;
+                } catch (Exception $e) {
+                    $error = $e->getMessage();
+                }
+            } else {
+                $error = "Database connection lost. Please reconnect and try again.";
+            }
+        }
         ?>
 
         <?php if ($error): ?>
@@ -329,6 +394,23 @@
                                     <input type="hidden" name="database" value="<?php echo htmlspecialchars($database); ?>">
                                     <button type="submit" name="dump_database" class="dump-button">Export Database Dump</button>
                                 </form>
+                                <?php
+                                // Check if oc_customer table exists in this database
+                                $hasCustomerTable = false;
+                                if ($conn) {
+                                    try {
+                                        $hasCustomerTable = $conn->query("SHOW TABLES FROM `{$database}` LIKE 'oc_customer'")->rowCount() > 0;
+                                    } catch (PDOException $e) {
+                                        // Table check failed, don't show the button
+                                    }
+                                }
+                                if ($hasCustomerTable):
+                                ?>
+                                <form method="POST" action="" style="display: inline;">
+                                    <input type="hidden" name="database" value="<?php echo htmlspecialchars($database); ?>">
+                                    <button type="submit" name="export_customers" class="dump-button" style="background-color: #FF9800;">Export Customers CSV</button>
+                                </form>
+                                <?php endif; ?>
                             </div>
                             <?php
                             // Get tables for this database
